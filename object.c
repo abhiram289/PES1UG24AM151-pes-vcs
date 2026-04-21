@@ -116,7 +116,7 @@ static int write_full(int fd, const unsigned char *buf, size_t len) {
 //   - rename             : atomically moving the temp file to the final path
 //
 
-//
+
 // Returns 0 on success, -1 on error.
 int object_write(ObjectType type, const void *data, size_t len, ObjectID *id_out) {
     const char *type_str = object_type_name(type);
