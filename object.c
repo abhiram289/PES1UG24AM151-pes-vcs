@@ -87,7 +87,7 @@ static int write_full(int fd, const unsigned char *buf, size_t len) {
 
 // ─── TODO: Implement these ──────────────────────────────────────────────────
 
-// an object to the store.
+// Write an object to the store.
 //
 // Object format on disk:
 //   "<type> <size>\0<data>"
@@ -293,5 +293,5 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
     *len_out = size;
 
     free(buffer);
-    return 0;
+    
 }
