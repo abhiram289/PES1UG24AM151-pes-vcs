@@ -234,22 +234,9 @@ int index_load(Index *index)
 //   - rename                           : atomically moving the temp file over the old index
 //
 // Returns 0 on success, -1 on error.
-static int compare_entries(const void *a, const void *b)
-{
-    const IndexEntry *ea = a;
-    const IndexEntry *eb = b;
-    return strcmp(ea->path, eb->path);
-}
 
-static int fsync_index_dir(void)
-{
-    int dir_fd = open(PES_DIR, O_RDONLY);
-    if (dir_fd < 0)
-        return -1;
-    int rc = fsync(dir_fd);
-    close(dir_fd);
-    return rc;
-}
+
+
 
 int index_save(const Index *index)
 {
