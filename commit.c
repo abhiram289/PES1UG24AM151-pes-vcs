@@ -234,7 +234,8 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
     void *data;
     size_t len;
 
-   
+    if (commit_serialize(&commit, &data, &len) != 0)
+        return -1;
 
     if (len == 0) {
         free(data);
@@ -251,8 +252,7 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
 
     (void)message;
     (void)commit_id_out;
-    if (head_update(commit_id_out) != 0)
-        return -1;
+    
 
     return 0;
 }
