@@ -23,6 +23,36 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
+#include <inttypes.h>
+#include <limits.h>
+
+extern int object_write(ObjectType type,const void *data,size_t len,ObjectID *id_out);
+
+static uint32_t mode_from_stat(const struct stat *st)
+{
+    return (st->st_mode & S_IXUSR) ? 0100755 : 0100644;
+}
+
+static void fill_index_entry(IndexEntry *e,
+                             const char *path,
+                             uint32_t mode,
+                             const ObjectID *hash,
+                             const struct stat *st,
+                             uint32_t size)
+{
+    e->mode = mode;
+    e->hash = *hash;
+    e->mtime_sec = (uint64_t)st->st_mtime;
+    e->size = size;
+    snprintf(e->path, sizeof(e->path), "%s", path);
+}
+
+static int compare_names(const void *a, const void *b)
+{
+    const char *const *sa = (const char *const *)a;
+    const char *const *sb = (const char *const *)b;
+    return strcmp(*sa, *sb);
+}
 
 // ─── PROVIDED ────────────────────────────────────────────────────────────────
 
@@ -91,6 +121,8 @@ int index_status(const Index *index) {
     int untracked_count = 0;
     DIR *dir = opendir(".");
     if (dir) {
+        char *untracked[1024];
+        int untracked_total = 0;
         struct dirent *ent;
         while ((ent = readdir(dir)) != NULL) {
             // Skip hidden directories, parent directories, and build artifacts
@@ -110,12 +142,20 @@ int index_status(const Index *index) {
             
             if (!is_tracked) {
                 struct stat st;
-                stat(ent->d_name, &st);
-                if (S_ISREG(st.st_mode)) { // Only list regular files for simplicity
-                    printf("  untracked:  %s\n", ent->d_name);
-                    untracked_count++;
+                if (stat(ent->d_name, &st) == 0 && S_ISREG(st.st_mode)) {
+                    if (untracked_total < (int)(sizeof(untracked) / sizeof(untracked[0]))) {
+                        untracked[untracked_total] = strdup(ent->d_name);
+                        if (untracked[untracked_total])
+                            untracked_total++;
+                    }
                 }
             }
+        }
+        qsort(untracked, (size_t)untracked_total, sizeof(char *), compare_names);
+        for (int i = 0; i < untracked_total; i++) {
+            printf("  untracked:  %s\n", untracked[i]);
+            free(untracked[i]);
+            untracked_count++;
         }
         closedir(dir);
     }
@@ -134,11 +174,50 @@ int index_status(const Index *index) {
 //   - hex_to_hash                      : converting the parsed string to ObjectID
 //
 // Returns 0 on success, -1 on error.
-int index_load(Index *index) {
-    // TODO: Implement index loading
-    // (See Lab Appendix for logical steps)
-    (void)index;
-    return -1;
+int index_load(Index *index)
+{
+    index->count = 0;
+
+    FILE *fp = fopen(INDEX_FILE, "r");
+    if (!fp)
+        return 0;   // index missing is valid
+
+    char line[1024];
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        if (line[0] == '\n' || line[0] == '\r' || line[0] == '\0')
+            continue;
+
+        if (index->count >= MAX_INDEX_ENTRIES) {
+            fclose(fp);
+            return -1;
+        }
+
+        IndexEntry *e = &index->entries[index->count];
+        char hash_hex[HASH_HEX_SIZE + 1];
+
+        int n = sscanf(line,
+                       "%o %64s %" SCNu64 " %u %511s",
+                       &e->mode,
+                       hash_hex,
+                       &e->mtime_sec,
+                       &e->size,
+                       e->path);
+
+        if (n != 5) {
+            fclose(fp);
+            return -1;  // malformed index line
+        }
+
+        if (hex_to_hash(hash_hex, &e->hash) != 0) {
+            fclose(fp);
+            return -1;
+        }
+
+        index->count++;
+    }
+
+    fclose(fp);
+    return 0;
 }
 
 // Save the index to .pes/index atomically.
@@ -151,11 +230,91 @@ int index_load(Index *index) {
 //   - rename                           : atomically moving the temp file over the old index
 //
 // Returns 0 on success, -1 on error.
-int index_save(const Index *index) {
-    // TODO: Implement atomic index saving
-    // (See Lab Appendix for logical steps)
-    (void)index;
-    return -1;
+static int compare_entries(const void *a, const void *b)
+{
+    const IndexEntry *ea = a;
+    const IndexEntry *eb = b;
+    return strcmp(ea->path, eb->path);
+}
+
+static int fsync_index_dir(void)
+{
+    int dir_fd = open(PES_DIR, O_RDONLY);
+    if (dir_fd < 0)
+        return -1;
+    int rc = fsync(dir_fd);
+    close(dir_fd);
+    return rc;
+}
+
+int index_save(const Index *index)
+{
+    char tmp_path[256];
+
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", INDEX_FILE);
+
+        FILE *fp = fopen(tmp_path, "w");
+    if (!fp)
+        return -1;
+
+    IndexEntry *sorted = NULL;
+    if (index->count > 0) {
+        sorted = malloc((size_t)index->count * sizeof(IndexEntry));
+        if (!sorted) {
+            fclose(fp);
+            unlink(tmp_path);
+            return -1;
+        }
+        memcpy(sorted, index->entries, (size_t)index->count * sizeof(IndexEntry));
+        qsort(sorted, (size_t)index->count, sizeof(IndexEntry), compare_entries);
+    }
+
+    for (int i = 0; i < index->count; i++)
+    {
+        char hash_hex[HASH_HEX_SIZE + 1];
+        hash_to_hex(&sorted[i].hash, hash_hex);
+
+        if (fprintf(fp,
+                    "%o %s %" PRIu64 " %u %s\n",
+                    sorted[i].mode,
+                    hash_hex,
+                    sorted[i].mtime_sec,
+                    sorted[i].size,
+                    sorted[i].path) < 0)
+        {
+            free(sorted);
+            fclose(fp);
+            unlink(tmp_path);
+            return -1;
+        }
+    }
+
+    if (fflush(fp) != 0 || fsync(fileno(fp)) != 0) {
+        free(sorted);
+        fclose(fp);
+        unlink(tmp_path);
+        return -1;
+    }
+
+    if (fclose(fp) != 0) {
+        free(sorted);
+        unlink(tmp_path);
+        return -1;
+    }
+
+    if (rename(tmp_path, INDEX_FILE) != 0) {
+        free(sorted);
+        unlink(tmp_path);
+        return -1;
+    }
+
+    if (fsync_index_dir() != 0) {
+        free(sorted);
+        return -1;
+    }
+
+    free(sorted);
+    return 0;
 }
 
 // Stage a file for the next commit.
@@ -167,9 +326,79 @@ int index_save(const Index *index) {
 //   - index_find                       : checking if the file is already staged
 //
 // Returns 0 on success, -1 on error.
-int index_add(Index *index, const char *path) {
-    // TODO: Implement file staging
-    // (See Lab Appendix for logical steps)
-    (void)index; (void)path;
-    return -1;
+int index_add(Index *index, const char *path)
+{
+    struct stat st;
+
+    if (stat(path, &st) != 0)
+        return -1;
+
+    if (!S_ISREG(st.st_mode))
+        return -1;
+
+    uint32_t mode;
+
+    FILE *fp = fopen(path, "rb");
+    if (!fp)
+        return -1;
+
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return -1;
+    }
+
+    long file_len = ftell(fp);
+    if (file_len < 0 || (unsigned long)file_len > UINT32_MAX) {
+        fclose(fp);
+        return -1;
+    }
+
+    uint32_t size = (uint32_t)file_len;
+    rewind(fp);
+
+    void *data = malloc(size > 0 ? size : 1);
+    if (!data)
+    {
+        fclose(fp);
+        return -1;
+    }
+
+    if (size > 0 && fread(data, 1, size, fp) != size)
+    {
+        free(data);
+        fclose(fp);
+        return -1;
+    }
+    fclose(fp);
+
+    ObjectID hash;
+
+    if (object_write(OBJ_BLOB, data, size, &hash) != 0)
+    {
+        free(data);
+        return -1;
+    }
+
+    free(data);
+
+    mode = mode_from_stat(&st);
+
+    IndexEntry *existing = index_find(index, path);
+
+    if (existing)
+    {
+        fill_index_entry(existing, path, mode, &hash, &st, size);
+    }
+    else
+    {
+        if (index->count >= MAX_INDEX_ENTRIES)
+            return -1;
+
+        IndexEntry *e = &index->entries[index->count];
+        fill_index_entry(e, path, mode, &hash, &st, size);
+
+        index->count++;
+    }
+
+    return index_save(index);
 }
