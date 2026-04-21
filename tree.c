@@ -131,6 +131,7 @@ int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
     *data_out = buffer;
     *len_out = offset;
     
+    return 0;
 }
 
 // ─── TODO: Implement these ──────────────────────────────────────────────────
