@@ -293,5 +293,5 @@ int object_read(const ObjectID *id, ObjectType *type_out, void **data_out, size_
     *len_out = size;
 
     free(buffer);
-    
+    return 0;
 }
