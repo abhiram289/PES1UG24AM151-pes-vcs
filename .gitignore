@@ -1,3 +1,11 @@
+# PES internal storage (like .git)
 .pes/
+
+# Compiled object files
 *.o
+
+# Executables
+pes
+test_tree
+test_objects
 
