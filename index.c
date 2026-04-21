@@ -234,9 +234,22 @@ int index_load(Index *index)
 //   - rename                           : atomically moving the temp file over the old index
 //
 // Returns 0 on success, -1 on error.
+static int compare_entries(const void *a, const void *b)
+{
+    const IndexEntry *ea = a;
+    const IndexEntry *eb = b;
+    return strcmp(ea->path, eb->path);
+}
 
-
-
+static int fsync_index_dir(void)
+{
+    int dir_fd = open(PES_DIR, O_RDONLY);
+    if (dir_fd < 0)
+        return -1;
+    int rc = fsync(dir_fd);
+    close(dir_fd);
+    return rc;
+}
 
 int index_save(const Index *index)
 {
@@ -280,32 +293,6 @@ int index_save(const Index *index)
         }
     }
 
-    if (fflush(fp) != 0 || fsync(fileno(fp)) != 0) {
-        free(sorted);
-        fclose(fp);
-        unlink(tmp_path);
-        return -1;
-    }
-
-    if (fclose(fp) != 0) {
-        free(sorted);
-        unlink(tmp_path);
-        return -1;
-    }
-
-    if (rename(tmp_path, INDEX_FILE) != 0) {
-        free(sorted);
-        unlink(tmp_path);
-        return -1;
-    }
-
-    if (fsync_index_dir() != 0) {
-        free(sorted);
-        return -1;
-    }
-
-    free(sorted);
-    return 0;
 }
 
 // Stage a file for the next commit.
