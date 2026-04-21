@@ -88,6 +88,7 @@ static int compare_tree_entries(const void *a, const void *b) {
     return strcmp(((const TreeEntry *)a)->name, ((const TreeEntry *)b)->name);
 }
 
+// Serialize a Tree struct into binary format for storage.
 // Caller must free(*data_out).
 // Returns 0 on success, -1 on error.
 int tree_serialize(const Tree *tree, void **data_out, size_t *len_out) {
@@ -288,11 +289,3 @@ new_prefix[sizeof(new_prefix) - 1] = '\0';
     return 0;
 }
 
-int tree_from_index(ObjectID *id_out) {
-    TempEntry entries[MAX_INDEX_ENTRIES];
-    int count = 0;
-    if (load_temp_entries_from_index(entries, &count) != 0)
-        return -1;
-
-    return build_tree_level(entries, count, NULL, id_out);
-}
