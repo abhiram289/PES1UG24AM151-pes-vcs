@@ -33,6 +33,8 @@ static uint32_t mode_from_stat(const struct stat *st)
     return (st->st_mode & S_IXUSR) ? 0100755 : 0100644;
 }
 
+
+
 static void fill_index_entry(IndexEntry *e,
                              const char *path,
                              uint32_t mode,
@@ -174,6 +176,8 @@ int index_status(const Index *index) {
 //   - hex_to_hash                      : converting the parsed string to ObjectID
 //
 // Returns 0 on success, -1 on error.
+
+
 int index_load(Index *index)
 {
     index->count = 0;
