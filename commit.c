@@ -224,8 +224,9 @@ int commit_create(const char *message, ObjectID *commit_id_out) {
 
     commit.tree = tree_id;
 
-    if (try_read_head_parent(&commit.parent, &commit.has_parent) != 0)
-        return -1;
+    if (try_read_head_parent(&commit.parent, &commit.has_parent) != 0) {
+    commit.has_parent = 0;  // No parent for initial commit
+}
 
     fill_commit_identity(&commit);
 
