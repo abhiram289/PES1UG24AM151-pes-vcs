@@ -289,3 +289,11 @@ new_prefix[sizeof(new_prefix) - 1] = '\0';
     return 0;
 }
 
+int tree_from_index(ObjectID *id_out) {
+    TempEntry entries[MAX_INDEX_ENTRIES];
+    int count = 0;
+    if (load_temp_entries_from_index(entries, &count) != 0)
+        return -1;
+
+    return build_tree_level(entries, count, NULL, id_out);
+}
